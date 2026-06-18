@@ -289,6 +289,30 @@ from_chars_advanced(parsed_number_string_t<UC> &pns, T &value) noexcept {
   return answer;
 }
 
+// Runtime -> compile-time dispatch over both boolean knobs of
+// parse_number_string. basic_json_fmt was already dispatched this way; the
+// digit separator is selected here too so that the separator-aware code paths
+// stay confined to the (cold) has_separator==true instantiation. Callers that
+// never set a separator -- the overwhelming majority -- run the
+// has_separator==false instantiation, which is byte-for-byte the original
+// separator-free parser.
+template <typename UC>
+fastfloat_really_inline FASTFLOAT_CONSTEXPR20 parsed_number_string_t<UC>
+parse_number_string_options(UC const *first, UC const *last,
+                            parse_options_t<UC> options, bool bjf,
+                            bool store_spans) noexcept {
+  if (options.digit_separator != UC('\0')) {
+    return bjf ? parse_number_string<true, true, UC>(first, last, options,
+                                                     store_spans)
+               : parse_number_string<false, true, UC>(first, last, options,
+                                                      store_spans);
+  }
+  return bjf ? parse_number_string<true, false, UC>(first, last, options,
+                                                    store_spans)
+             : parse_number_string<false, false, UC>(first, last, options,
+                                                     store_spans);
+}
+
 // Slow path: re-parse materializing the integer/fraction spans the hot no-span
 // parse skipped, then run the full algorithm. The two callers reach it only
 // through a fastfloat_unlikely branch, so the optimizer keeps this re-parse off
@@ -301,8 +325,7 @@ FASTFLOAT_CONSTEXPR20 from_chars_result_t<UC>
 parse_number_slow_path(UC const *first, UC const *last, T &value,
                        parse_options_t<UC> options, bool bjf) noexcept {
   parsed_number_string_t<UC> pns =
-      bjf ? parse_number_string<true, UC>(first, last, options, true)
-          : parse_number_string<false, UC>(first, last, options, true);
+      parse_number_string_options(first, last, options, bjf, true);
   return from_chars_advanced(pns, value);
 }
 
@@ -336,8 +359,7 @@ from_chars_float_advanced(UC const *first, UC const *last, T &value,
   // parsed_number_string_t off the hot path. store_spans is a runtime argument,
   // so this reuses the single parse_number_string instantiation.
   parsed_number_string_t<UC> pns =
-      bjf ? parse_number_string<true, UC>(first, last, options, false)
-          : parse_number_string<false, UC>(first, last, options, false);
+      parse_number_string_options(first, last, options, bjf, false);
   if (!pns.valid) {
     if (uint64_t(fmt & chars_format::no_infnan)) {
       answer.ec = std::errc::invalid_argument;
@@ -539,6 +561,13 @@ template <typename T, typename UC>
 fastfloat_really_inline FASTFLOAT_CONSTEXPR20 from_chars_result_t<UC>
 from_chars_advanced(UC const *first, UC const *last, T &value,
                     parse_options_t<UC> options) noexcept {
+  if (((options.format_options & parse_options_t<UC>::skip_prefix) != 0) &&
+      (last - first >= 2) && (*first == UC('0'))) {
+    UC const c_low = UC(first[1] | UC(0x20));
+    if (c_low == UC('x') || c_low == UC('b')) {
+      first += 2;
+    }
+  }
   return from_chars_advanced_caller<
       size_t(is_supported_float_type<T>::value) +
       2 * size_t(is_supported_integer_type<T>::value)>::call(first, last, value,

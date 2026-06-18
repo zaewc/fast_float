@@ -681,6 +681,47 @@ TEST_CASE("decimal_point_parsing") {
   }
 }
 
+TEST_CASE("digit_separator") {
+  double result;
+  fast_float::parse_options options{};
+  options.digit_separator = '_';
+  auto parse = [&](std::string const &input, double expected) {
+    auto answer = fast_float::from_chars_advanced(
+        input.data(), input.data() + input.size(), result, options);
+    CHECK_MESSAGE(answer.ec == std::errc(), "expected parse success");
+    CHECK_MESSAGE(answer.ptr == input.data() + input.size(),
+                  "Parsing should have stopped at end");
+    CHECK_EQ(result, expected);
+  };
+  parse("1_000", 1000.0);
+  parse("1.00_5", 1.005);
+  parse("1e1_0", 1e10);
+  parse("1_5e1_2", 15e12);
+  parse("1_5.0_5e1_2", 15.05e12);
+  // overflow re-scan paths (> 19 significant digits) with separators
+  parse("1_000_000_000_000_000_000_000", 1e21);
+  parse("123_456_789_012_345_678_901_234.5", 123456789012345678901234.5);
+  parse("0.0000000000000000000_1234567890123456789", 1.234567890123456789e-20);
+}
+
+TEST_CASE("skip_prefix") {
+  double result;
+  fast_float::parse_options options{};
+  options.format_options = fast_float::parse_options::skip_prefix;
+  auto parse = [&](std::string const &input, double expected) {
+    auto answer = fast_float::from_chars_advanced(
+        input.data(), input.data() + input.size(), result, options);
+    CHECK_MESSAGE(answer.ec == std::errc(), "expected parse success");
+    CHECK_EQ(result, expected);
+  };
+  // prefix is consumed, the remaining digits are parsed in base 10
+  parse("0x10", 10.0);
+  parse("0X25", 25.0);
+  parse("0b11", 11.0);
+  parse("0B11", 11.0);
+  parse("42", 42.0); // no prefix present
+}
+
 TEST_CASE("issue19") {
   std::string const input = "234532.3426362,7869234.9823,324562.645";
   double result;

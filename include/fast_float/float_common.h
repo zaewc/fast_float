@@ -70,15 +70,35 @@ using from_chars_result = from_chars_result_t<char>;
 
 template <typename UC> struct parse_options_t {
   constexpr explicit parse_options_t(chars_format fmt = chars_format::general,
-                                     UC dot = UC('.'), int b = 10)
-      : format(fmt), decimal_point(dot), base(b) {}
+                                     UC dot = UC('.'), int b = 10,
+                                     UC sep = UC('\0'), uint8_t opts = 0)
+      : format(fmt), decimal_point(dot), digit_separator(sep),
+        format_options(opts), base(b) {}
+
+  // Member order is chosen so that, for the common UC == char case, the two
+  // new single-byte fields land in the padding that already existed between
+  // decimal_point and base. This keeps sizeof(parse_options_t<char>) == 16, so
+  // the struct is still passed in registers (ARM64/x86-64) and the default
+  // parse path is unaffected. Reordering would grow the struct and force it
+  // onto the stack at the call boundary.
 
   /** Which number formats are accepted */
   chars_format format;
   /** The character used as decimal point */
   UC decimal_point;
+  /** The character used as digit separator (e.g. '\''). Use '\0' to disable.
+   * When disabled (the default), the parser compiles to the exact same code as
+   * if this option did not exist: separator handling is gated on a compile-time
+   * template parameter, so the default hot path carries no extra branches. */
+  UC digit_separator;
+  /** Additional format options (bitmask), see the static flags below. */
+  uint8_t format_options;
   /** The base used for integers */
   int base;
+
+  /** Skip a leading base prefix (0x/0X, 0b/0B) before parsing. Decimal-only:
+   * the digits are still parsed in base 10, the prefix is merely consumed. */
+  static constexpr uint8_t skip_prefix = 1;
 };
 
 using parse_options = parse_options_t<char>;
