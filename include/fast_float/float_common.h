@@ -217,6 +217,12 @@ using parse_options = parse_options_t<char>;
 #define fastfloat_really_inline inline __attribute__((always_inline))
 #endif
 
+#ifdef FASTFLOAT_VISUAL_STUDIO
+#define FASTFLOAT_NOINLINE __declspec(noinline)
+#else
+#define FASTFLOAT_NOINLINE __attribute__((noinline, cold))
+#endif
+
 // Branch-probability hint marking the rare slow-path branches as cold, so the
 // optimizer keeps the out-of-line slow-path re-parse off the hot path (and does
 // not duplicate the force-inlined hot scanner into the caller, which bloated

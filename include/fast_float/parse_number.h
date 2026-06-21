@@ -139,7 +139,7 @@ fastfloat_really_inline bool rounds_to_nearest() noexcept {
 
 template <typename T> struct from_chars_caller {
   template <typename UC>
-  FASTFLOAT_CONSTEXPR20 static from_chars_result_t<UC>
+  fastfloat_really_inline FASTFLOAT_CONSTEXPR20 static from_chars_result_t<UC>
   call(UC const *first, UC const *last, T &value,
        parse_options_t<UC> options) noexcept {
     return from_chars_advanced(first, last, value, options);
@@ -149,7 +149,7 @@ template <typename T> struct from_chars_caller {
 #ifdef __STDCPP_FLOAT32_T__
 template <> struct from_chars_caller<std::float32_t> {
   template <typename UC>
-  FASTFLOAT_CONSTEXPR20 static from_chars_result_t<UC>
+  fastfloat_really_inline FASTFLOAT_CONSTEXPR20 static from_chars_result_t<UC>
   call(UC const *first, UC const *last, std::float32_t &value,
        parse_options_t<UC> options) noexcept {
     // if std::float32_t is defined, and we are in C++23 mode; macro set for
@@ -166,7 +166,7 @@ template <> struct from_chars_caller<std::float32_t> {
 #ifdef __STDCPP_FLOAT64_T__
 template <> struct from_chars_caller<std::float64_t> {
   template <typename UC>
-  FASTFLOAT_CONSTEXPR20 static from_chars_result_t<UC>
+  fastfloat_really_inline FASTFLOAT_CONSTEXPR20 static from_chars_result_t<UC>
   call(UC const *first, UC const *last, std::float64_t &value,
        parse_options_t<UC> options) noexcept {
     // if std::float64_t is defined, and we are in C++23 mode; macro set for
@@ -289,23 +289,32 @@ from_chars_advanced(parsed_number_string_t<UC> &pns, T &value) noexcept {
   return answer;
 }
 
+template <bool bjf, typename UC>
+FASTFLOAT_NOINLINE FASTFLOAT_CONSTEXPR20 parsed_number_string_t<UC>
+parse_number_string_with_separator(UC const *first, UC const *last,
+                                   parse_options_t<UC> options,
+                                   bool store_spans) noexcept {
+  return parse_number_string<bjf, true, UC>(first, last, options, store_spans);
+}
+
 // Runtime -> compile-time dispatch over both boolean knobs of
 // parse_number_string. basic_json_fmt was already dispatched this way; the
 // digit separator is selected here too so that the separator-aware code paths
-// stay confined to the (cold) has_separator==true instantiation. Callers that
-// never set a separator -- the overwhelming majority -- run the
+// stay confined to the (cold, out-of-line) has_separator==true instantiation.
+// Callers that never set a separator -- the overwhelming majority -- run the
 // has_separator==false instantiation, which is byte-for-byte the original
-// separator-free parser.
+// separator-free parser; the separator check is a single predictable branch
+// into cold code.
 template <typename UC>
 fastfloat_really_inline FASTFLOAT_CONSTEXPR20 parsed_number_string_t<UC>
 parse_number_string_options(UC const *first, UC const *last,
                             parse_options_t<UC> options, bool bjf,
                             bool store_spans) noexcept {
-  if (options.digit_separator != UC('\0')) {
-    return bjf ? parse_number_string<true, true, UC>(first, last, options,
-                                                     store_spans)
-               : parse_number_string<false, true, UC>(first, last, options,
-                                                      store_spans);
+  if fastfloat_unlikely (options.digit_separator != UC('\0')) {
+    return bjf ? parse_number_string_with_separator<true, UC>(
+                     first, last, options, store_spans)
+               : parse_number_string_with_separator<false, UC>(
+                     first, last, options, store_spans);
   }
   return bjf ? parse_number_string<true, false, UC>(first, last, options,
                                                     store_spans)
